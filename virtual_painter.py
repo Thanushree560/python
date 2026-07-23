@@ -1,116 +1,116 @@
-"""
-virtual_painter.py
---------------------
-Draw on screen using just your index finger in the air.
-
-Controls (gestures):
-  - Index finger up only          -> Draw
-  - Index + middle fingers up     -> Selection mode (move without drawing)
-  - All 5 fingers up              -> Clear the canvas
-Press 'c' to change color, 's' to save your drawing, 'q' to quit.
-"""
-
 import cv2
 import numpy as np
-import time
 from hand_tracking_module import HandDetector
 
-COLORS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 255, 255)]
-COLOR_NAMES = ["Red", "Green", "Blue", "Yellow", "White"]
-BRUSH_THICKNESS = 12
-ERASER_THICKNESS = 60
+brushThickness = 15
+eraserThickness = 60
 
+detector = HandDetector()
 
-def main():
-    cap = cv2.VideoCapture(0)
-    cap.set(3, 1280)
-    cap.set(4, 720)
+drawColor = (255,0,255)
 
-    detector = HandDetector(detection_confidence=0.8, max_hands=1)
+cap = cv2.VideoCapture(0)
 
-    canvas = None
-    prev_x, prev_y = 0, 0
-    color_index = 0
-    prev_time = 0
+cap.set(3,1280)
+cap.set(4,720)
 
-    while True:
-        success, frame = cap.read()
-        if not success:
-            print("Could not read from webcam.")
-            break
+xp, yp = 0,0
 
-        frame = cv2.flip(frame, 1)
-        if canvas is None:
-            canvas = np.zeros_like(frame)
+imgCanvas = np.zeros((720,1280,3),np.uint8)
 
-        frame = detector.find_hands(frame, draw=True)
-        landmark_list = detector.find_positions(frame)
+while True:
 
-        if landmark_list:
-            x1, y1 = landmark_list[8][1], landmark_list[8][2]   # index tip
-            x2, y2 = landmark_list[12][1], landmark_list[12][2]  # middle tip
+    success,img = cap.read()
 
-            fingers = detector.fingers_up(landmark_list)
+    img=cv2.flip(img,1)
 
-            # All fingers up -> clear canvas
-            if fingers == [1, 1, 1, 1, 1]:
-                canvas = np.zeros_like(frame)
-                prev_x, prev_y = 0, 0
+    img=detector.findHands(img)
 
-            # Selection mode: index + middle up
-            elif fingers[1] and fingers[2] and not fingers[3]:
-                prev_x, prev_y = 0, 0
-                cv2.rectangle(frame, (x1 - 15, y1 - 25), (x2 + 15, y2 + 25),
-                              COLORS[color_index], cv2.FILLED)
+    lmList=detector.findPosition(img)
 
-            # Draw mode: only index finger up
-            elif fingers[1] and not fingers[2]:
-                cv2.circle(frame, (x1, y1), 8, COLORS[color_index], cv2.FILLED)
-                if prev_x == 0 and prev_y == 0:
-                    prev_x, prev_y = x1, y1
-                cv2.line(canvas, (prev_x, prev_y), (x1, y1),
-                          COLORS[color_index], BRUSH_THICKNESS)
-                prev_x, prev_y = x1, y1
+    if len(lmList)!=0:
+
+        x1,y1=lmList[8][1:]
+        x2,y2=lmList[12][1:]
+
+        fingers=detector.fingersUp()
+
+        # Selection Mode
+        if len(fingers)>=2 and fingers[1] and fingers[2]:
+
+            xp,yp=0,0
+
+            if y1<100:
+
+                if 50<x1<250:
+                    drawColor=(255,0,255)
+
+                elif 300<x1<500:
+                    drawColor=(255,0,0)
+
+                elif 550<x1<750:
+                    drawColor=(0,255,0)
+
+                elif 800<x1<1000:
+                    drawColor=(0,0,255)
+
+                elif 1050<x1<1250:
+                    drawColor=(0,0,0)
+
+            cv2.rectangle(img,(x1,y1-25),(x2,y2+25),drawColor,cv2.FILLED)
+
+        # Drawing Mode
+        if len(fingers)>=2 and fingers[1] and not fingers[2]:
+
+            cv2.circle(img,(x1,y1),10,drawColor,cv2.FILLED)
+
+            if xp==0 and yp==0:
+                xp,yp=x1,y1
+
+            if drawColor==(0,0,0):
+
+                cv2.line(img,(xp,yp),(x1,y1),drawColor,eraserThickness)
+
+                cv2.line(imgCanvas,(xp,yp),(x1,y1),drawColor,eraserThickness)
+
             else:
-                prev_x, prev_y = 0, 0
 
-        # Merge canvas onto the live frame
-        gray = cv2.cvtColor(canvas, cv2.COLOR_BGR2GRAY)
-        _, mask = cv2.threshold(gray, 20, 255, cv2.THRESH_BINARY_INV)
-        mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-        frame = cv2.bitwise_and(frame, mask)
-        frame = cv2.bitwise_or(frame, canvas)
+                cv2.line(img,(xp,yp),(x1,y1),drawColor,brushThickness)
 
-        # UI: color palette bar
-        for i, col in enumerate(COLORS):
-            cv2.rectangle(frame, (10 + i * 60, 10), (60 + i * 60, 60), col, cv2.FILLED)
-            if i == color_index:
-                cv2.rectangle(frame, (10 + i * 60, 10), (60 + i * 60, 60), (0, 0, 0), 3)
-        cv2.putText(frame, COLOR_NAMES[color_index], (10, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                cv2.line(imgCanvas,(xp,yp),(x1,y1),drawColor,brushThickness)
 
-        # FPS
-        curr_time = time.time()
-        fps = 1 / (curr_time - prev_time) if prev_time else 0
-        prev_time = curr_time
-        cv2.putText(frame, f'FPS: {int(fps)}', (frame.shape[1] - 150, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+            xp,yp=x1,y1
 
-        cv2.imshow("Virtual Painter", frame)
+    cv2.rectangle(img,(50,10),(250,90),(255,0,255),cv2.FILLED)
+    cv2.putText(img,"Pink",(80,60),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            break
-        elif key == ord('c'):
-            color_index = (color_index + 1) % len(COLORS)
-        elif key == ord('s'):
-            filename = f"drawing_{int(time.time())}.png"
-            cv2.imwrite(filename, canvas)
-            print(f"Saved drawing to {filename}")
+    cv2.rectangle(img,(300,10),(500,90),(255,0,0),cv2.FILLED)
+    cv2.putText(img,"Blue",(340,60),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
 
-    cap.release()
-    cv2.destroyAllWindows()
+    cv2.rectangle(img,(550,10),(750,90),(0,255,0),cv2.FILLED)
+    cv2.putText(img,"Green",(570,60),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
 
+    cv2.rectangle(img,(800,10),(1000,90),(0,0,255),cv2.FILLED)
+    cv2.putText(img,"Red",(850,60),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
 
-if __name__ == "__main__":
-    main()
+    cv2.rectangle(img,(1050,10),(1250,90),(0,0,0),cv2.FILLED)
+    cv2.putText(img,"Erase",(1080,60),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
+
+    imgGray=cv2.cvtColor(imgCanvas,cv2.COLOR_BGR2GRAY)
+
+    _,imgInv=cv2.threshold(imgGray,50,255,cv2.THRESH_BINARY_INV)
+
+    imgInv=cv2.cvtColor(imgInv,cv2.COLOR_GRAY2BGR)
+
+    img=cv2.bitwise_and(img,imgInv)
+
+    img=cv2.bitwise_or(img,imgCanvas)
+
+    cv2.imshow("AI Virtual Painter",img)
+
+    if cv2.waitKey(1)&0xFF==27:
+        break
+
+cap.release()
+
+cv2.destroyAllWindows()
